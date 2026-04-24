@@ -1,7 +1,6 @@
 # PythonEnvironment
 
-Ansible Role for Python Runtime Environment
-Rôle Ansible robuste pour créer un virtualenv Python sur le control node Ansible.
+Rôle Ansible pour créer un virtualenv Python sur le control node Ansible.
 
 ## Objectifs
 
