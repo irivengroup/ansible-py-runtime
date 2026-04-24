@@ -17,8 +17,9 @@ lock_file: "{{ base_dir }}.lock"
 pip_up: false
 venv_recreate: false
 
-venv_owner: "{{ lookup('env', 'USER') }}"
-venv_group: "{{ lookup('pipe', 'id -gn') }}"
+# Optional overrides. If empty, resolved automatically on the control node.
+venv_owner: ""
+venv_group: ""
 
 pip_index_url: ""
 pip_extra_args: ""

@@ -54,12 +54,48 @@
   delegate_to: localhost
   run_once: true
 
+- name: Resolve effective local venv owner
+  ansible.builtin.set_fact:
+    _venv_owner: >-
+      {{
+        venv_owner
+        if (venv_owner | length > 0)
+        else (
+          ansible_sudo_user
+          | default(ansible_become_user, true)
+          | default(ansible_user, true)
+          | default(lookup('env', 'SUDO_USER'), true)
+          | default(lookup('env', 'USER'), true)
+        )
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Resolve effective local venv group
+  ansible.builtin.set_fact:
+    _venv_group: >-
+      {{
+        venv_group
+        if (venv_group | length > 0)
+        else lookup('pipe', 'id -gn ' + _venv_owner)
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Show resolved local ownership
+  ansible.builtin.debug:
+    msg:
+      - "venv owner: {{ _venv_owner }}"
+      - "venv group: {{ _venv_group }}"
+  delegate_to: localhost
+  run_once: true
+
 - name: Ensure version root exists
   ansible.builtin.file:
     path: "{{ venv_root }}/{{ py_ver }}"
     state: directory
-    owner: "{{ venv_owner }}"
-    group: "{{ venv_group }}"
+    owner: "{{ _venv_owner }}"
+    group: "{{ _venv_group }}"
     mode: "0775"
   become: true
   delegate_to: localhost
@@ -108,7 +144,7 @@
 
       mkdir -p "{{ base_dir }}"
       mkdir -p "{{ pip_cache }}"
-      chown -R "{{ venv_owner }}:{{ venv_group }}" "{{ base_dir }}"
+      chown -R "{{ _venv_owner }}:{{ _venv_group }}" "{{ base_dir }}"
 
       if [ "{{ venv_recreate | bool }}" = "True" ]; then
         rm -rf "{{ venv_dir }}"
@@ -122,18 +158,18 @@
       fi
 
       if [ ! -x "{{ venv_dir }}/bin/python" ]; then
-        sudo -u "{{ venv_owner }}" "{{ py_bin }}" -m venv "{{ venv_dir }}"
+        sudo -u "{{ _venv_owner }}" "{{ py_bin }}" -m venv "{{ venv_dir }}"
       fi
 
       if [ "{{ pip_up | bool }}" = "True" ]; then
-        sudo -u "{{ venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install           --disable-pip-version-check           --upgrade pip setuptools wheel
+        sudo -u "{{ _venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install           --disable-pip-version-check           --upgrade pip setuptools wheel
       fi
 
       {% if req_stat.stat.exists %}
-      sudo -u "{{ venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install         --disable-pip-version-check         {% if pip_index_url | length > 0 %}--index-url "{{ pip_index_url }}"{% endif %}         {{ pip_extra_args }}         -r "{{ role_path }}/files/{{ req_file }}"
+      sudo -u "{{ _venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install         --disable-pip-version-check         {% if pip_index_url | length > 0 %}--index-url "{{ pip_index_url }}"{% endif %}         {{ pip_extra_args }}         -r "{{ role_path }}/files/{{ req_file }}"
       {% endif %}
 
-      chown -R "{{ venv_owner }}:{{ venv_group }}" "{{ base_dir }}"
+      chown -R "{{ _venv_owner }}:{{ _venv_group }}" "{{ base_dir }}"
     '
   args:
     executable: /bin/bash
@@ -147,7 +183,7 @@
   register: venv_py_ver
   changed_when: false
   become: true
-  become_user: "{{ venv_owner }}"
+  become_user: "{{ _venv_owner }}"
   delegate_to: localhost
   run_once: true
 
@@ -166,7 +202,7 @@
   loop: "{{ py_imports }}"
   changed_when: false
   become: true
-  become_user: "{{ venv_owner }}"
+  become_user: "{{ _venv_owner }}"
   delegate_to: localhost
   run_once: true
 
@@ -176,7 +212,7 @@
   register: pip_freeze
   changed_when: false
   become: true
-  become_user: "{{ venv_owner }}"
+  become_user: "{{ _venv_owner }}"
   delegate_to: localhost
   run_once: true
 
@@ -192,11 +228,11 @@
       base_dir: "{{ base_dir }}"
       venv_dir: "{{ venv_dir }}"
       pip_cache: "{{ pip_cache }}"
-      owner: "{{ venv_owner }}"
-      group: "{{ venv_group }}"
+      owner: "{{ _venv_owner }}"
+      group: "{{ _venv_group }}"
       python_check: "{{ py_check.stdout }}"
-    owner: "{{ venv_owner }}"
-    group: "{{ venv_group }}"
+    owner: "{{ _venv_owner }}"
+    group: "{{ _venv_group }}"
     mode: "0644"
   become: true
   delegate_to: localhost
@@ -207,8 +243,8 @@
     dest: "{{ base_dir }}/requirements.freeze.txt"
     content: "{{ pip_freeze.stdout }}
 "
-    owner: "{{ venv_owner }}"
-    group: "{{ venv_group }}"
+    owner: "{{ _venv_owner }}"
+    group: "{{ _venv_group }}"
     mode: "0644"
   become: true
   delegate_to: localhost
@@ -218,7 +254,7 @@
   ansible.builtin.debug:
     msg:
       - "venv: {{ venv_dir }}"
-      - "owner: {{ venv_owner }}:{{ venv_group }}"
+      - "owner: {{ _venv_owner }}:{{ _venv_group }}"
       - "python: {{ py_check.stdout }}"
       - "requirements: {{ req_stat.stat.exists | ternary(req_file, 'none') }}"
       - "hash: {{ req_hash }}"
