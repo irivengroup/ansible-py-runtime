@@ -1,8 +1,8 @@
 ---
 galaxy_info:
   role_name: PythonEnvironment
-  namespace: local
-  author: local
+  namespace: iriven
+  author: IRIVEN GROUP
   description: Create resilient Python virtualenvs on the Ansible control node.
   license: MIT
   min_ansible_version: "2.15"
