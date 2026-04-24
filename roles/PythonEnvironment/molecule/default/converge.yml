@@ -1,0 +1,12 @@
+---
+- name: Converge
+  hosts: all
+  gather_facts: false
+
+  roles:
+    - role: PythonEnvironment
+      vars:
+        venv_name: "molecule"
+        py_imports:
+          - requests
+          - yaml

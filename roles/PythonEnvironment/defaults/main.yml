@@ -1,0 +1,37 @@
+---
+py_ver: "3.12"
+py_bin: "python{{ py_ver }}"
+
+req_file: "req.txt"
+req_required: true
+req_hash_len: 12
+
+venv_name: "default"
+venv_root: "/opt/PythonVirtualenvs"
+
+base_dir: "{{ venv_root }}/{{ py_ver }}/{{ venv_name }}-{{ req_hash }}"
+venv_dir: "{{ base_dir }}/.venv"
+pip_cache: "{{ base_dir }}/.cache/pip"
+lock_file: "{{ base_dir }}.lock"
+
+pip_up: false
+venv_recreate: false
+
+venv_owner: "{{ lookup('env', 'USER') }}"
+venv_group: "{{ lookup('pipe', 'id -gn') }}"
+
+pip_index_url: ""
+pip_extra_args: ""
+
+py_imports: []
+
+py_debian_pkgs:
+  - "python{{ py_ver }}"
+  - "python{{ py_ver }}-venv"
+  - "python{{ py_ver }}-dev"
+  - "python3-pip"
+
+py_redhat_pkgs:
+  - "python{{ py_ver | replace('.', '') }}"
+  - "python{{ py_ver | replace('.', '') }}-pip"
+  - "python{{ py_ver | replace('.', '') }}-devel"

@@ -1,0 +1,226 @@
+---
+- name: Gather facts on control node
+  ansible.builtin.setup:
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
+- name: Fail on unsupported OS family
+  ansible.builtin.fail:
+    msg: "Unsupported OS family: {{ hostvars['localhost'].ansible_os_family }}"
+  when: hostvars['localhost'].ansible_os_family not in ["Debian", "RedHat"]
+  delegate_to: localhost
+  run_once: true
+
+- name: Install Python prerequisites on Debian family
+  ansible.builtin.apt:
+    name: "{{ py_debian_pkgs }}"
+    state: present
+    update_cache: true
+  become: true
+  when: hostvars['localhost'].ansible_os_family == "Debian"
+  delegate_to: localhost
+  run_once: true
+
+- name: Install Python prerequisites on RedHat family
+  ansible.builtin.dnf:
+    name: "{{ py_redhat_pkgs }}"
+    state: present
+  become: true
+  when: hostvars['localhost'].ansible_os_family == "RedHat"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check requirements file exists and checksum
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/{{ req_file }}"
+    checksum_algorithm: sha256
+  register: req_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if requirements file is required but missing
+  ansible.builtin.fail:
+    msg: "Missing required requirements file: {{ role_path }}/files/{{ req_file }}"
+  when:
+    - req_required | bool
+    - not req_stat.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Set requirements hash
+  ansible.builtin.set_fact:
+    req_hash: "{{ (req_stat.stat.exists | ternary(req_stat.stat.checksum, 'no-requirements'))[:req_hash_len] }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Ensure version root exists
+  ansible.builtin.file:
+    path: "{{ venv_root }}/{{ py_ver }}"
+    state: directory
+    owner: "{{ venv_owner }}"
+    group: "{{ venv_group }}"
+    mode: "0775"
+  become: true
+  delegate_to: localhost
+  run_once: true
+
+- name: Check selected Python exists
+  ansible.builtin.command:
+    cmd: "{{ py_bin }} --version"
+  register: py_check
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check venv module exists
+  ansible.builtin.command:
+    cmd: "{{ py_bin }} -m venv --help"
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Check pip module exists
+  ansible.builtin.command:
+    cmd: "{{ py_bin }} -m pip --version"
+  register: pip_check
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Bootstrap pip if missing
+  ansible.builtin.command:
+    cmd: "{{ py_bin }} -m ensurepip --upgrade"
+  when: pip_check.rc != 0
+  become: true
+  delegate_to: localhost
+  run_once: true
+
+- name: Create and provision venv under lock
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    mkdir -p "$(dirname "{{ lock_file }}")"
+
+    flock "{{ lock_file }}" bash -c '
+      set -euo pipefail
+
+      mkdir -p "{{ base_dir }}"
+      mkdir -p "{{ pip_cache }}"
+      chown -R "{{ venv_owner }}:{{ venv_group }}" "{{ base_dir }}"
+
+      if [ "{{ venv_recreate | bool }}" = "True" ]; then
+        rm -rf "{{ venv_dir }}"
+      fi
+
+      if [ -x "{{ venv_dir }}/bin/python" ]; then
+        cur_ver="$("{{ venv_dir }}/bin/python" -c "import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")")"
+        if [ "$cur_ver" != "{{ py_ver }}" ]; then
+          rm -rf "{{ venv_dir }}"
+        fi
+      fi
+
+      if [ ! -x "{{ venv_dir }}/bin/python" ]; then
+        sudo -u "{{ venv_owner }}" "{{ py_bin }}" -m venv "{{ venv_dir }}"
+      fi
+
+      if [ "{{ pip_up | bool }}" = "True" ]; then
+        sudo -u "{{ venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install           --disable-pip-version-check           --upgrade pip setuptools wheel
+      fi
+
+      {% if req_stat.stat.exists %}
+      sudo -u "{{ venv_owner }}" env PIP_CACHE_DIR="{{ pip_cache }}" "{{ venv_dir }}/bin/python" -m pip install         --disable-pip-version-check         {% if pip_index_url | length > 0 %}--index-url "{{ pip_index_url }}"{% endif %}         {{ pip_extra_args }}         -r "{{ role_path }}/files/{{ req_file }}"
+      {% endif %}
+
+      chown -R "{{ venv_owner }}:{{ venv_group }}" "{{ base_dir }}"
+    '
+  args:
+    executable: /bin/bash
+  become: true
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate venv Python version
+  ansible.builtin.command:
+    cmd: "{{ venv_dir }}/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'"
+  register: venv_py_ver
+  changed_when: false
+  become: true
+  become_user: "{{ venv_owner }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Assert venv Python version is correct
+  ansible.builtin.assert:
+    that:
+      - venv_py_ver.stdout == py_ver
+    fail_msg: "Venv creation failed: expected Python {{ py_ver }}, got {{ venv_py_ver.stdout }}"
+    success_msg: "Venv Python version is correct: {{ venv_py_ver.stdout }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate Python imports
+  ansible.builtin.command:
+    cmd: "{{ venv_dir }}/bin/python -c 'import {{ item }}'"
+  loop: "{{ py_imports }}"
+  changed_when: false
+  become: true
+  become_user: "{{ venv_owner }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Freeze installed packages
+  ansible.builtin.command:
+    cmd: "{{ venv_dir }}/bin/pip freeze"
+  register: pip_freeze
+  changed_when: false
+  become: true
+  become_user: "{{ venv_owner }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Write metadata
+  ansible.builtin.copy:
+    dest: "{{ base_dir }}/metadata.yml"
+    content: |
+      py_ver: "{{ py_ver }}"
+      py_bin: "{{ py_bin }}"
+      venv_name: "{{ venv_name }}"
+      req_file: "{{ req_file }}"
+      req_hash: "{{ req_hash }}"
+      base_dir: "{{ base_dir }}"
+      venv_dir: "{{ venv_dir }}"
+      pip_cache: "{{ pip_cache }}"
+      owner: "{{ venv_owner }}"
+      group: "{{ venv_group }}"
+      python_check: "{{ py_check.stdout }}"
+    owner: "{{ venv_owner }}"
+    group: "{{ venv_group }}"
+    mode: "0644"
+  become: true
+  delegate_to: localhost
+  run_once: true
+
+- name: Write requirements freeze
+  ansible.builtin.copy:
+    dest: "{{ base_dir }}/requirements.freeze.txt"
+    content: "{{ pip_freeze.stdout }}
+"
+    owner: "{{ venv_owner }}"
+    group: "{{ venv_group }}"
+    mode: "0644"
+  become: true
+  delegate_to: localhost
+  run_once: true
+
+- name: Summary
+  ansible.builtin.debug:
+    msg:
+      - "venv: {{ venv_dir }}"
+      - "owner: {{ venv_owner }}:{{ venv_group }}"
+      - "python: {{ py_check.stdout }}"
+      - "requirements: {{ req_stat.stat.exists | ternary(req_file, 'none') }}"
+      - "hash: {{ req_hash }}"
+  delegate_to: localhost
+  run_once: true

@@ -1,0 +1,17 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: default
+platforms:
+  - name: instance
+provisioner:
+  name: ansible
+  inventory:
+    hosts:
+      all:
+        hosts:
+          localhost:
+            ansible_connection: local
+verifier:
+  name: ansible

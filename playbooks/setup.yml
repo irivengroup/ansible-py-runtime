@@ -1,0 +1,12 @@
+---
+- name: Setup Python environment on control node
+  hosts: all
+  gather_facts: false
+
+  roles:
+    - role: PythonEnvironment
+      vars:
+        venv_name: "myapp"
+        py_imports:
+          - requests
+          - yaml

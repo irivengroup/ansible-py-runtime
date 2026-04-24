@@ -1,0 +1,15 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Check venv root exists
+      ansible.builtin.stat:
+        path: /opt/PythonVirtualenvs/3.12
+      register: venv_root_stat
+
+    - name: Assert venv root exists
+      ansible.builtin.assert:
+        that:
+          - venv_root_stat.stat.exists
